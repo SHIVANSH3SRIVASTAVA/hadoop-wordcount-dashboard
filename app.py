@@ -2,42 +2,28 @@ import streamlit as st
 import subprocess
 import os
 import pandas as pd
+import re
 
 st.set_page_config(page_title="Hadoop WordCount", layout="centered")
 
-# -------------------- DARK THEME (FORCED) --------------------
+# -------------------- CONFIG --------------------
+DEPLOY_MODE = True   # 👉 Change to False for local Hadoop execution
+
+# -------------------- DARK THEME --------------------
 st.markdown("""
     <style>
     .stApp {
         background-color: #0e1117;
         color: white;
     }
-
-    /* Text */
     h1, h2, h3, h4, h5, h6, p, span, label {
         color: white !important;
     }
-
-    /* Buttons */
     .stButton>button {
         background-color: #262730;
         color: white;
         border-radius: 8px;
         border: 1px solid #444;
-        padding: 0.5rem 1rem;
-    }
-
-    /* File uploader */
-    .stFileUploader {
-        background-color: #1c1e26;
-        color: white;
-        border-radius: 10px;
-        padding: 10px;
-    }
-
-    /* Dataframe */
-    .stDataFrame {
-        color: white;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -50,90 +36,87 @@ st.markdown("---")
 if "data_ready" not in st.session_state:
     st.session_state.data_ready = False
 
-if "show_top" not in st.session_state:
-    st.session_state.show_top = False
-
-if "show_chart" not in st.session_state:
-    st.session_state.show_chart = False
+if "df_sorted" not in st.session_state:
+    st.session_state.df_sorted = None
 
 # -------------------- FILE UPLOAD --------------------
-st.subheader("📂 Upload Input File")
-
 uploaded_file = st.file_uploader("Upload a .txt file", type=["txt"])
 
 if uploaded_file is not None:
-    with open("input/user_input.txt", "wb") as f:
-        f.write(uploaded_file.getbuffer())
 
+    text = uploaded_file.read().decode("utf-8")
     st.success("✅ File uploaded successfully!")
 
     if st.button("🚀 Run WordCount"):
 
         st.session_state.data_ready = False
-        st.session_state.show_top = False
-        st.session_state.show_chart = False
 
-        if os.path.exists("output"):
-            subprocess.run(["rm", "-rf", "output"])
+        # -------------------- DEPLOY MODE --------------------
+        if DEPLOY_MODE:
+            words = re.findall(r"[a-zA-Z]+", text.lower())
 
-        with st.spinner("Processing with Hadoop..."):
+            word_count = {}
+            for word in words:
+                word_count[word] = word_count.get(word, 0) + 1
+
+            df = pd.DataFrame(word_count.items(), columns=["Word", "Count"])
+            df_sorted = df.sort_values(by="Count", ascending=False).reset_index(drop=True)
+
+        # -------------------- HADOOP MODE --------------------
+        else:
+            with open("input/user_input.txt", "w") as f:
+                f.write(text)
+
+            if os.path.exists("output"):
+                subprocess.run(["rm", "-rf", "output"])
+
             subprocess.run(
                 ["bash", "run.sh", "input/user_input.txt"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
 
+            df = pd.read_csv("output/part-r-00000", sep="\t", header=None)
+            df.columns = ["Word", "Count"]
+
+            df_sorted = df.sort_values(by="Count", ascending=False).reset_index(drop=True)
+
+        # Save to session
+        st.session_state.df_sorted = df_sorted
         st.session_state.data_ready = True
 
 # -------------------- RESULTS --------------------
 if st.session_state.data_ready:
 
-    if os.path.exists("output/part-r-00000"):
+    df_sorted = st.session_state.df_sorted
 
-        df = pd.read_csv("output/part-r-00000", sep="\t", header=None)
-        df.columns = ["Word", "Count"]
+    st.subheader("📄 Full Word Count Output")
 
-        df_sorted = df.sort_values(by="Count", ascending=False).reset_index(drop=True)
+    # 🔍 Search
+    search_query = st.text_input("🔍 Search word")
 
-        # -------------------- FULL OUTPUT --------------------
-        st.subheader("📄 Full Word Count Output")
+    if search_query:
+        filtered_df = df_sorted[
+            df_sorted["Word"].str.contains(search_query, case=False, na=False)
+        ]
+    else:
+        filtered_df = df_sorted
 
-        search_query = st.text_input("🔍 Search word")
+    st.dataframe(filtered_df, hide_index=True, width="stretch")
 
-        if search_query:
-            filtered_df = df_sorted[
-                df_sorted["Word"].str.contains(search_query, case=False, na=False)
-            ]
-        else:
-            filtered_df = df_sorted
+    st.markdown("---")
 
-        st.dataframe(filtered_df, hide_index=True, width="stretch")
+    # -------------------- ANALYSIS --------------------
+    col1, col2 = st.columns(2)
 
-        st.markdown("---")
-
-        # -------------------- ANALYSIS --------------------
-        st.subheader("⚙️ Analysis Tools")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            if st.button("📈 Toggle Top Words"):
-                st.session_state.show_top = not st.session_state.show_top
-
-        with col2:
-            if st.button("📊 Toggle Chart"):
-                st.session_state.show_chart = not st.session_state.show_chart
-
-        # -------------------- TOP WORDS --------------------
-        if st.session_state.show_top:
-            st.subheader("🔝 Top 5 Words")
+    with col1:
+        if st.button("📈 Show Top Words"):
             st.table(df_sorted.head(5))
 
-        # -------------------- CHART --------------------
-        if st.session_state.show_chart:
-            st.subheader("📊 Word Frequency Chart")
+    with col2:
+        if st.button("📊 Show Chart"):
             st.bar_chart(df_sorted.head(5).set_index("Word"))
 
 # -------------------- FOOTER --------------------
 st.markdown("---")
-st.caption("Built with ❤️ using Hadoop + Streamlit")
+st.caption("Hadoop (Local) + Deployable UI Version")
