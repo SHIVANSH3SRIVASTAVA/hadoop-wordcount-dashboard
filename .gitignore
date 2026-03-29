@@ -1,0 +1,13 @@
+# Hadoop output
+output/
+
+# Java
+*.class
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store

@@ -1,0 +1,4 @@
+Hadoop is powerful.
+Big data is the future.
+Hadoop processes big data efficiently.
+Hello world hello data!
